@@ -354,7 +354,18 @@ function kernel_opt_layout()
     echo
 }
 
-ARGS=$(getopt -o hvacf:kmns -- "$@")
+function disk_layout()
+{
+    echo -e "\033[44;37m**********disk layout**********\033[0m"
+    for bdf in $(lspci -nnv | grep 'NVM' | awk '{print $1}')
+    do
+        echo $(lspci -s $bdf)
+        echo $(lspci -s $bdf -vv | grep -i 'lnksta\|lnkcap')
+    echo
+    done
+}
+
+ARGS=$(getopt -o hvacdf:kmns -- "$@")
 if [ $? != 0 ] ; then echo "terminating..." >&2 ; exit ; fi 
 if [ $# -lt 1 ] ; then echo "use -h/--help to check available options" >&2 ; exit ; fi 
 
@@ -376,6 +387,10 @@ do
         -c|--cpu)
             cpu_layout
             shift  
+            ;;
+        -d|--disk)
+            disk_layout
+            shift
             ;;
         -f|--file)
             #log_to_file $2
@@ -407,6 +422,7 @@ do
             echo -e "\t-a: show all set of system information"
             echo -e "\t-c: show cpu layout"
             echo -e "\t-k: show kernel parameters"
+            echo -e "\t-d: show disk layout"
             echo -e "\t-m: show memory layout"
             echo -e "\t-n: show nic layout"
             echo -e "\t-s: show spdk layout"
