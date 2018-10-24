@@ -1,5 +1,12 @@
 #!/bin/bash
 # author: aaron
+echo '     _____  _____  _  __'
+echo '    |  __ \|  __ \| |/ /'
+echo '_  _| |__) | |  | |   / '
+echo ' \/ /  ___/| |  | |  <  '
+echo '>  <| |    | |__| | . \ '
+echo '_/\_\_|    |_____/|_|\_\'
+
 function get_nr_processor()
 {
     grep '^processor' /proc/cpuinfo | wc -l
@@ -71,7 +78,7 @@ else
 fi
 
 tabs 6
-echo -e "\033[47;34mthreads on per isolated cores:\033[0m"
+echo -e "\033[47;34mthreads on per cores:\033[0m"
 num=$nr_cores
 echo -e 'core id\t\tthreads'
 while [ "$num" -gt 0 ]
@@ -121,7 +128,41 @@ else
     echo $(grep -i 'Hugepages_free' /proc/meminfo)
 fi
 echo
+echo -e "\033[47;34mboard information\033[0m"
+echo $(dmidecode -t 2 | grep -A 5 'Base Board Information')
+echo
+echo -e "\033[47;34mmemory physical layout\033[0m"
+dmidecode -t 16 | grep -A 6 'Physical Memory Array'
+echo
+echo 'all physical DIMM and capacity:'
+for dmi_slot in $(lshw -C memory | grep _DIMM_ | awk -F: '{printf $2}')
+do
+    echo $dmi_slot : $(dmidecode -t 17 | grep -B 3 $dmi_slot | grep Size: | awk -F: '{printf $2}')
+done
+echo
+echo -e "\033[47;34mrunning memory dimm\033[0m"
+#dmidecode -t 17 | grep -C 7 'Size: [0-9]'
+dmidecode -t 17 | grep -C 7 'Size: [0-9]' | awk -F: '{
+    if ($2 ~ /DIMM_/) {
+        gsub(/ /,"",$2);
+        p_id=$2;
+    } else if ($1 ~ /Bank Locator/){
+        gsub(/ /,"",$2);
+        s_id=$2;
+        arr[s_id]=arr[s_id] "\t" p_id
+    } else if ($1 ~ /Speed/){
+        gsub(/ /,"",$2);
+        arr[s_id]=arr[s_id]"("$2")"
+    }	
+}
+END{
+    for (i in arr) {
+        printf "Memory %s:%s\n", i, arr[i];
+    }
+}'
+echo
 echo -e "\033[44;30m**********NIC pre-flight**********\033[0m"
+echo
 echo -e '=====\t\tNIC Cap and DPDK-Support checking\t\t====='
 #refer to command below to generate dpdk supported device id(supported_nic_dev_id) based on actual envioroment:
 #cd $DPDK_FOLDER
@@ -176,5 +217,80 @@ fi
 
 
 echo
+echo -e "\033[44;30m**********SPDK pre-flight**********\033[0m"
+echo -e '=====\t\tdisk probing\t\t====='
+
+# backport disk probe function from community
+tabs 8 
+function iter_pci_class_code() {
+        local class="$(printf %02x $((0x$1)))"
+        local subclass="$(printf %02x $((0x$2)))"
+        local progif="$(printf %02x $((0x$3)))"
+
+        if hash lspci &>/dev/null; then
+                if [ "$progif" != "00" ]; then
+                        lspci -mm -n -D | \
+                                grep -i -- "-p${progif}" | \
+                                awk -v cc="\"${class}${subclass}\"" -F " " \
+                                '{if (cc ~ $2) print $1}' | tr -d '"'
+                else
+                        lspci -mm -n -D | \
+                                awk -v cc="\"${class}${subclass}\"" -F " " \
+                                '{if (cc ~ $2) print $1}' | tr -d '"'
+                fi
+        elif hash pciconf &>/dev/null; then
+                addr=($(pciconf -l | grep -i "class=0x${class}${subclass}${progif}" | \
+                        cut -d$'\t' -f1 | sed -e 's/^[a-zA-Z0-9_]*@pci//g' | tr ':' ' '))
+                printf "%04x:%02x:%02x:%x\n" ${addr[0]} ${addr[1]} ${addr[2]} ${addr[3]}
+        else
+                echo "Missing PCI enumeration utility"
+                exit 1
+        fi
+}
+
+function iter_pci_dev_id() {
+        local ven_id="$(printf %04x $((0x$1)))"
+        local dev_id="$(printf %04x $((0x$2)))"
+
+        if hash lspci &>/dev/null; then
+                lspci -mm -n -D | awk -v ven="\"$ven_id\"" -v dev="\"${dev_id}\"" -F " " \
+                        '{if (ven ~ $3 && dev ~ $4) print $1}' | tr -d '"'
+        elif hash pciconf &>/dev/null; then
+                addr=($(pciconf -l | grep -i "chip=0x${dev_id}${ven_id}" | \
+                        cut -d$'\t' -f1 | sed -e 's/^[a-zA-Z0-9_]*@pci//g' | tr ':' ' '))
+                printf "%04x:%02x:%02x:%x\n" ${addr[0]} ${addr[1]} ${addr[2]} ${addr[3]}
+        else
+                echo "Missing PCI enumeration utility"
+                exit 1
+        fi
+}
+
+echo "NVMe devices"
+echo -e "BDF\t\tNuma Node\tDriver name\t\tDevice name"
+for bdf in $(iter_pci_class_code 01 08 02); do
+    driver=`grep DRIVER /sys/bus/pci/devices/$bdf/uevent |awk -F"=" '{print $2}'`
+    node=`cat /sys/bus/pci/devices/$bdf/numa_node`;
+    if [ "$driver" = "nvme" -a -d /sys/bus/pci/devices/$bdf/nvme ]; then
+        name="\t"`ls /sys/bus/pci/devices/$bdf/nvme`;
+    else
+        name="-";
+    fi
+    echo -e "$bdf\t$node\t\t$driver\t\t$name";
+done
+
+echo "I/OAT DMA"
+
+#collect all the device_id info of ioat devices.
+#TMP=`grep "PCI_DEVICE_ID_INTEL_IOAT" $rootdir/include/spdk/pci_ids.h | awk -F"x" '{print $2}'`
+TMP='3c20 3c21 3c22 3c23 3c24 3c25 3c26 3c27 3c2e 3c2f 0e20 0e21 0e22 0e23 0e24 0e25 0e26 0e27 0e2e 0e2f 2f20 2f21 2f22 2f23 2f24 2f25 2f26 2f27 2f2e 2f2f 0C50 0C51 0C52 0C53 6f50 6f51 6f52 6f53 6f20 6f21 6f22 6f23 6f24 6f25 6f26 6f27 6f2e 6f2f 2021'
+echo -e "BDF\t\tNuma Node\tDriver Name"
+for dev_id in $TMP; do
+    for bdf in $(iter_pci_dev_id 8086 $dev_id); do
+        driver=`grep DRIVER /sys/bus/pci/devices/$bdf/uevent |awk -F"=" '{print $2}'`
+        node=`cat /sys/bus/pci/devices/$bdf/numa_node`;
+        echo -e "$bdf\t$node\t\t$driver"
+    done
+done
+
 echo -e "\033[4;33menf of pre-flight\033[0m"
 
