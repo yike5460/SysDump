@@ -1,4 +1,4 @@
-# xPDKcheck
+# SysDump
 Obtaine server topology layout, including:
 1. CPU (option -c)
 2. kernel (option -k)
