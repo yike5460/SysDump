@@ -40,6 +40,19 @@ perf script -i perf.data | FlameGraph/stackcollapse-perf.pl | FlameGraph/flamegr
 - -ftree-vectorize -ftree-vectorizer-verbose=5
 - Intel: -msse2
 
+# check with command below for gcc compiler tuning option
+```
+ubuntu@ip-172-31-19-250:~$ gcc -march=native -Q --help=targetgcc -march=native -Q --help=target | grep -- '-mtune=' | cut -f3
+cc1: warning: unrecognized argument to --help= option: ‘targetgcc’
+skylake-avx512
+  Known valid arguments for -mtune= option:
+ubuntu@ip-172-31-19-250:~$ gcc -march=native -Q --help=target | grep -- '-mtune=' | cut -f3
+skylake-avx512
+  Known valid arguments for -mtune= option:
+```
+# Lock/Synchronization intensive workload
+LSE based locking and synchronization is an order of magnitude faster for highly contended locks with high core counts (e.g. 64 with Graviton2). For workloads that have highly contended locks, compiling with -march=armv8.2-a will enable LSE based atomics and can substantially increase performance. However, this will prevent the code from running on an Arm v8.0 system such as AWS Graviton-based EC2 A1 instances. With GCC 10 and newer an option -moutline-atomics will not inline atomics and detect at run time the correct type of atomic to use. This is slightly worse performing than -march=armv8.2-a but does retain backwards compatibility.
+
 ## Python
 
 ```
